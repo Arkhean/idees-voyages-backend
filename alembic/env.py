@@ -1,6 +1,7 @@
 import asyncio
 from logging.config import fileConfig
 
+import sqlalchemy as sa
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -29,6 +30,19 @@ config.set_main_option("sqlalchemy.url", app_config.DATABASE_URL)
 
 target_metadata = Base.metadata
 
+
+def compare_type(context, inspected_column, metadata_column, inspected_type, metadata_type):
+    """Ignore the UUID columns SQLite reflects back as NUMERIC.
+
+    SQLite has no native UUID type, so it reports `sa.UUID` columns as
+    NUMERIC, which autogenerate would otherwise flag as a type change on
+    every run. Returning None falls back to Alembic's default comparison.
+    """
+    if isinstance(metadata_type, sa.UUID) and isinstance(inspected_type, sa.NUMERIC):
+        return False
+    return None
+
+
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
@@ -51,6 +65,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        compare_type=compare_type,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -61,7 +76,11 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations using an already-open sync connection."""
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=compare_type,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
